@@ -1,6 +1,6 @@
 import sqlite3
 import hashlib
-
+import requests
 adminPassword = "root"
 salt = "huh"
 execution_key = "abcd"
@@ -11,7 +11,6 @@ def connect():
     try:
         con = sqlite3.connect("data.db")
         cursor = con.cursor()
-        print("DataBase Connected")
     except:
         print("Database Error")
         return None,None
@@ -24,13 +23,12 @@ def createTables():
     if cursor == None or con == None:
         return 0
     cursor.execute("create table if not exists admin(username varchar, password varchar)")
-    con.commit()
     cursor.execute("create table if not exists contest(name varchar, desc varchar, input varchar, output varchar, sample varchar)")
-    con.commit()
     cursor.execute("create table if not exists contestDetails(name varchar, start varchar, id varchar)")
-    con.commit()
     cursor.execute("create table if not exists user(name varchar, email varchar, rollno varchar, password varchar, codechef varchar, codeforces varchar, leetcode varchar, rcc varchar, rcf varchar, rlc varchar)")
-    con.commit()
+    cursor.execute("create table if not exists upcomingContest(platform varchar, name varchar, startTime varchar, url varchar )")
+    cursor.execute("create table if not exists contestSubmissionLog(name varchar, rollno varchar, problem varchar, status varchar)")
+    cursor.execute("create table if not exists problemStatus(name varchar, A tinyint, B tinyint, C tinyint, D tinyint)")
     cursor.execute("create table if not exists announcement(announcement varchar)")
     con.commit()
     print("Tables are created")
@@ -51,6 +49,49 @@ def createTables():
         con.commit()
     con.close()
 
+    #Startup updates
+    print("fetching Upcoming contest")
+    updateUpcomingContest()
+    print("Upcoming contest are updated!")
+
+def updateUpcomingContest():
+    try:
+        result = {}
+        req = requests.get("https://kontests.net/api/v1/codeforces")
+        temp = req.json()
+        result["codeforces"] = temp
+        req = requests.get("https://kontests.net/api/v1/code_chef")
+        temp = req.json()
+        result["codechef"] = temp
+        req = requests.get("https://kontests.net/api/v1/leet_code")
+        temp = req.json()
+        result["leetcode"] = temp
+    except:
+        result = []
+    contest = result
+    cursor, con = connect()
+    if cursor is None or con is None:
+        return 0
+    cursor.execute('delete from upcomingContest')
+    for i in contest:
+        for j in contest[i]:
+            params = (i, j['name'], j['start_time'], j['url'])
+            cursor.execute('insert into upcomingContest values(?,?,?,?)', params)
+    con.commit()
+    con.close()
+
+def getUpcomingContest():
+    cursor, con = connect()
+    if cursor is None or con is None:
+        return 0
+    cursor.execute('select * from upcomingContest')
+    result = {}
+    rows = cursor.fetchall()
+    for row in rows:
+        if row[0] not in result:
+            result[row[0]] = []
+        result[row[0]].append({'name': row[1], 'start_time': row[2], 'url': row[3]})
+    return result
 
 def authenticate_admin(username,password):
     cursor, con = connect()
@@ -64,11 +105,12 @@ def authenticate_admin(username,password):
         if i[0] == username and i[1] == password:
             flag = 1
         break
+    con.close()
     if flag:
         return True
     else:
         return False
-    con.close()
+
 
 def run_query(query,key):
     if key != execution_key:
@@ -186,3 +228,34 @@ def get_announcement():
     for i in cursor:
         res = i[0]
     return res
+
+def updateProblemStatus(problem,verdict,name):
+    cursor, con = connect()
+    if con is None or cursor is None:
+        return 0
+    cursor.execute('select * from problemStatus where name = ?', (name,))
+    rows = cursor.fetchall()
+    if(len(rows) == 0):
+        cursor.execute("insert into problemStatus values(?,0,0,0,0)", (name,))
+        con.commit()
+    if(verdict == False):
+        cursor.execute('select * from problemStatus where name = ?', (name,))
+        row = cursor.fetchall()[0]
+        return [row[1],row[2],row[3],row[4]]
+    else:
+        cursor.execute(f'update problemStatus set {problem} = 1 where name = ? ', (name,))
+        con.commit()
+        cursor.execute('select * from problemStatus where name = ?', (name,))
+        row = cursor.fetchall()[0]
+        return [row[1], row[2], row[3], row[4]]
+
+def getProblemStatus(name):
+    cursor, con = connect()
+    if con is None or cursor is None:
+        return 0
+    cursor.execute('select * from problemStatus where name = ?', (name,))
+    rows = cursor.fetchall()
+    if len(rows) == 0:
+        return [0,0,0,0]
+    row = rows[0]
+    return [row[1], row[2], row[3], row[4]]
